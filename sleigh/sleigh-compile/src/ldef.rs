@@ -169,8 +169,19 @@ fn build_inner(
         }
     }
 
+    // Ghidra resolves register names from the .pspec and .cspec case-insensitively (the V850 cspec
+    // names `ctbp` while the SLEIGH defines `CTBP`), so fall back to a case-insensitive match.
     let get_reg = |name: &str| {
-        sleigh.get_varnode(name).ok_or_else(|| Error::UnknownRegister(name.to_string()))
+        sleigh
+            .get_varnode(name)
+            .or_else(|| {
+                sleigh
+                    .named_registers
+                    .iter()
+                    .find(|reg| sleigh.get_str(reg.name).eq_ignore_ascii_case(name))
+                    .and_then(|reg| reg.get_var())
+            })
+            .ok_or_else(|| Error::UnknownRegister(name.to_string()))
     };
 
     let pc = get_reg(&pspec.programcounter.register)?;

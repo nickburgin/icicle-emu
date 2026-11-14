@@ -425,3 +425,37 @@ fn self_modifying_code_after_write() {
     );
     assert_eq!(run_from(0x00), VmExit::UnhandledException((ExceptionCode::WritePerm, 0x21)));
 }
+
+/// Builds a V850 VM from the SLEIGH under `$GHIDRA_SRC/Ghidra/Processors`.
+fn v850_test_vm() -> crate::Vm {
+    let processors = std::path::PathBuf::from(
+        std::env::var_os("GHIDRA_SRC").expect("GHIDRA_SRC must point at a tree containing V850"),
+    )
+    .join("Ghidra/Processors");
+    crate::build_with_ldef(
+        &Config { enable_jit: false, ..Config::default() },
+        &processors,
+        "V850/data/languages/V850.ldefs",
+        "V850:LE:32:default",
+    )
+    .unwrap()
+}
+
+#[test]
+fn v850_mov_then_add() {
+    let mut vm = v850_test_vm();
+    vm.cpu.mem.map_memory_len(0x1000, 0x100, Mapping { perm: perm::READ | perm::EXEC, value: 0 });
+
+    static CODE: &[u8] = &[
+        0x05, 0x52, // mov 5, r10
+        0xca, 0x51, // add r10, r10
+    ];
+    vm.cpu.mem.write_bytes(0x1000, CODE, perm::NONE).unwrap();
+
+    vm.cpu.write_pc(0x1000);
+    assert_eq!(vm.step(2), VmExit::InstructionLimit);
+
+    let r10 = vm.cpu.arch.sleigh.get_varnode("r10").unwrap();
+    assert_eq!(vm.cpu.read_reg(r10), 10);
+    assert_eq!(vm.cpu.read_pc(), 0x1004);
+}

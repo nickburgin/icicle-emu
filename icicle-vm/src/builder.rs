@@ -43,7 +43,25 @@ pub fn build(config: &Config) -> Result<Vm, BuildError> {
 }
 
 pub fn build_with_path(config: &Config, processors: &Path) -> Result<Vm, BuildError> {
-    let mut lang = sleigh_init_with_path(&config.triple, processors)?;
+    let lang = sleigh_init_with_path(&config.triple, processors)?;
+    build_from_language(config, lang)
+}
+
+/// Builds a VM for a language selected by `.ldefs` file and language id instead of by target
+/// triple. `ldef` is relative to `processors` (e.g. `V850/data/languages/V850.ldefs`). The target
+/// triple in `config` is not used to pick the language, so processors that `target_lexicon` does
+/// not know can use the `unknown` triple.
+pub fn build_with_ldef(
+    config: &Config,
+    processors: &Path,
+    ldef: &str,
+    lang_id: &str,
+) -> Result<Vm, BuildError> {
+    let lang = sleigh_init_with_ldef(processors, ldef, lang_id)?;
+    build_from_language(config, lang)
+}
+
+fn build_from_language(config: &Config, mut lang: SleighLanguage) -> Result<Vm, BuildError> {
 
     let reg_next_pc = lang
         .sleigh
@@ -363,18 +381,35 @@ pub fn sleigh_init_with_path(
         _ => return Err(BuildError::UnsupportedArchitecture),
     };
 
-    let ldef_path = processors.join(ldef);
-    if !ldef_path.exists() {
-        return Err(BuildError::SpecNotFound(ldef_path));
-    }
-
-    let mut builder = sleigh_compile::SleighLanguageBuilder::new(ldef_path, id);
+    let mut builder = sleigh_ldef_builder(processors, ldef, id)?;
     if matches!(target.architecture, Architecture::Msp430) {
         builder = builder.define("SPLITFLAGS");
     }
 
     // @todo: use compiler specific variants for cspec when available.
     builder.build().map_err(|e| BuildError::SpecCompileError(e.to_string()))
+}
+
+fn sleigh_ldef_builder(
+    processors: &Path,
+    ldef: &str,
+    id: &str,
+) -> Result<sleigh_compile::SleighLanguageBuilder, BuildError> {
+    let ldef_path = processors.join(ldef);
+    if !ldef_path.exists() {
+        return Err(BuildError::SpecNotFound(ldef_path));
+    }
+    Ok(sleigh_compile::SleighLanguageBuilder::new(ldef_path, id))
+}
+
+pub fn sleigh_init_with_ldef(
+    processors: &Path,
+    ldef: &str,
+    id: &str,
+) -> Result<SleighLanguage, BuildError> {
+    sleigh_ldef_builder(processors, ldef, id)?
+        .build()
+        .map_err(|e| BuildError::SpecCompileError(e.to_string()))
 }
 
 fn get_default_processors_path() -> std::path::PathBuf {
